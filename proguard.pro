@@ -16,11 +16,16 @@
 
 -keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature,Exceptions
 
-# Fabric entrypoint method names must remain exactly as declared in the Java interfaces.
-# Keep the method names globally because Fabric API/Loader classes are runtime dependencies.
+# Fabric entrypoint contract.
 -keepclassmembers class * {
     public void onInitializeClient();
     public void onInitialize();
+}
+
+# Fabric client tick callback contract. Anonymous listener classes must keep the
+# exact callback method name or Fabric's interface dispatch fails at runtime.
+-keepclassmembers class * implements net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents$EndTick {
+    public void onEndTick(net.minecraft.class_310);
 }
 
 # Keep names of members that the mod accesses reflectively.
