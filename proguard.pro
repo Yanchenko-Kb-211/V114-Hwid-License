@@ -16,15 +16,15 @@
 
 -keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature,Exceptions
 
-# Fabric entrypoint contract.
+# Fabric entrypoint methods must keep their exact names.
 -keepclassmembers class * {
     public void onInitializeClient();
     public void onInitialize();
 }
 
-# Fabric client tick callback contract. Anonymous listener classes must keep the
-# exact callback method name or Fabric's interface dispatch fails at runtime.
--keepclassmembers class * implements net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents$EndTick {
+# Fabric tick callbacks are interface-dispatched at runtime. Keep the small
+# callback adapter classes and their callback method name intact.
+-keep class * implements net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents$EndTick {
     public void onEndTick(net.minecraft.class_310);
 }
 
