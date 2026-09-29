@@ -29,7 +29,7 @@ public final class LicenseProofClient {
 
     public static boolean check(String url, String hwid) throws Exception {
         String nonce = randomNonce();
-        String body = "{"hwid":"" + escapeJson(hwid) + "","nonce":"" + nonce + ""}";
+        String body = "{\"hwid\":\"" + escapeJson(hwid) + "\",\"nonce\":\"" + nonce + "\"}";
 
         HttpURLConnection c = (HttpURLConnection) URI.create(url).toURL().openConnection();
         c.setRequestMethod("POST");
@@ -145,14 +145,14 @@ public final class LicenseProofClient {
     }
 
     private static String readString(String json, String key) {
-        String needle = """ + key + """;
+        String needle = "\"" + key + "\"";
         int p = json.indexOf(needle);
         if (p < 0) throw new IllegalStateException("Missing field");
         p = json.indexOf(':', p + needle.length());
         if (p < 0) throw new IllegalStateException("Missing field");
         p++;
         while (p < json.length() && Character.isWhitespace(json.charAt(p))) p++;
-        if (p >= json.length() || json.charAt(p) != '"') throw new IllegalStateException("Invalid field");
+        if (p >= json.length() || json.charAt(p) != '\"') throw new IllegalStateException("Invalid field");
         p++;
         StringBuilder s = new StringBuilder();
         boolean esc = false;
@@ -165,14 +165,14 @@ public final class LicenseProofClient {
                 else s.append(ch);
                 esc = false;
             } else if (ch == '\\') esc = true;
-            else if (ch == '"') return s.toString();
+            else if (ch == '\"') return s.toString();
             else s.append(ch);
         }
         throw new IllegalStateException("Unterminated field");
     }
 
     private static String readBool(String json, String key) {
-        String needle = """ + key + """;
+        String needle = "\"" + key + "\"";
         int p = json.indexOf(needle);
         if (p < 0) return "false";
         p = json.indexOf(':', p + needle.length());
@@ -185,7 +185,7 @@ public final class LicenseProofClient {
     }
 
     private static long readLong(String json, String key) {
-        String needle = """ + key + """;
+        String needle = "\"" + key + "\"";
         int p = json.indexOf(needle);
         if (p < 0) throw new IllegalStateException("Missing field");
         p = json.indexOf(':', p + needle.length());
@@ -198,7 +198,7 @@ public final class LicenseProofClient {
     }
 
     private static String escapeJson(String s) {
-        return s.replace("\\", "\\\\").replace(""", "\\"");
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private static String bytesToHex(byte[] data) {
