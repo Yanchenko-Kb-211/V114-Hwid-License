@@ -16,16 +16,12 @@
 
 -keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature,Exceptions
 
-# Fabric entrypoint methods must keep their exact names.
+# Preserve callback/entrypoint method names by method name, without relying on
+# resolving external Fabric API types during the ProGuard pass.
 -keepclassmembers class * {
-    public void onInitializeClient();
-    public void onInitialize();
-}
-
-# Fabric tick callbacks are interface-dispatched at runtime. Keep the small
-# callback adapter classes and their callback method name intact.
--keep class * implements net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents$EndTick {
-    public void onEndTick(net.minecraft.class_310);
+    public void onInitializeClient(...);
+    public void onInitialize(...);
+    public void onEndTick(...);
 }
 
 # Keep names of members that the mod accesses reflectively.
