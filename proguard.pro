@@ -16,14 +16,10 @@
 
 -keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature,Exceptions
 
-# Fabric entrypoint method names are part of the ClientModInitializer contract.
-# The class names may still be obfuscated, while the required method name must remain intact.
--keepclassmembers class * implements net.fabricmc.api.ClientModInitializer {
+# Fabric entrypoint method names must remain exactly as declared in the Java interfaces.
+# Keep the method names globally because Fabric API/Loader classes are runtime dependencies.
+-keepclassmembers class * {
     public void onInitializeClient();
-}
-
-# Keep methods used by the common Fabric entrypoint contract if one is present.
--keepclassmembers class * implements net.fabricmc.api.ModInitializer {
     public void onInitialize();
 }
 
