@@ -60,6 +60,61 @@ public final class TransitionResetPatch {
 
         ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
             @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                              String signature, String[] exceptions) {
+                MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+
+                if (name.equals("tick") && descriptor.equals("(Ljava/lang/Object;)V")) {
+                    return new MethodVisitor(Opcodes.ASM9, mv) {
+                        @Override
+                        public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                    String methodDescriptor, boolean isInterface) {
+                            if (opcode == Opcodes.INVOKESTATIC
+                                    && owner.equals(AUTO)
+                                    && methodName.equals("pressD")
+                                    && methodDescriptor.equals("(Ljava/lang/Object;)V")) {
+
+                                Label normalPress = new Label();
+
+                                // AutoMove runs before SnakeTransition on the same client tick.
+                                // When moveTick has reached the transition threshold, do not
+                                // emit the normal D pulse. Release D and return; SnakeTransition
+                                // will see the same moveTick and start the Space/Space transition.
+                                visitFieldInsn(Opcodes.GETSTATIC, SNAKE, "phase", "I");
+                                visitJumpInsn(Opcodes.IFNE, normalPress);
+
+                                visitFieldInsn(Opcodes.GETSTATIC, AUTO, "moving", "Z");
+                                visitJumpInsn(Opcodes.IFEQ, normalPress);
+
+                                visitLdcInsn(FEATURES);
+                                visitLdcInsn("target");
+                                visitMethodInsn(Opcodes.INVOKESTATIC, AUTO,
+                                        "getStaticObject",
+                                        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;",
+                                        false);
+                                visitJumpInsn(Opcodes.IFNONNULL, normalPress);
+
+                                visitFieldInsn(Opcodes.GETSTATIC, AUTO, "moveTick", "I");
+                                visitIntInsn(Opcodes.BIPUSH, 20);
+                                visitJumpInsn(Opcodes.IF_ICMPLT, normalPress);
+
+                                visitVarInsn(Opcodes.ALOAD, 0);
+                                visitMethodInsn(Opcodes.INVOKESTATIC, AUTO,
+                                        "releaseD", "(Ljava/lang/Object;)V", false);
+                                visitInsn(Opcodes.RETURN);
+
+                                visitLabel(normalPress);
+                            }
+
+                            super.visitMethodInsn(opcode, owner, methodName, methodDescriptor, isInterface);
+                        }
+                    };
+                }
+
+                return mv;
+            }
+
+            @Override
             public void visitEnd() {
                 MethodVisitor mv = super.visitMethod(
                         Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
