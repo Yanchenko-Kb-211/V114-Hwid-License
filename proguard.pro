@@ -5,7 +5,6 @@
 
 -dontshrink
 -dontoptimize
--dontpreverify
 -dontwarn **
 -dontnote **
 -ignorewarnings
@@ -15,9 +14,20 @@
 -adaptclassstrings
 -adaptresourcefilecontents fabric.mod.json
 
--keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature
+-keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature,Exceptions
 
-# Keep names that are accessed reflectively by the mod itself.
+# Fabric entrypoint method names are part of the ClientModInitializer contract.
+# The class names may still be obfuscated, while the required method name must remain intact.
+-keepclassmembers class * implements net.fabricmc.api.ClientModInitializer {
+    public void onInitializeClient();
+}
+
+# Keep methods used by the common Fabric entrypoint contract if one is present.
+-keepclassmembers class * implements net.fabricmc.api.ModInitializer {
+    public void onInitialize();
+}
+
+# Keep names of members that the mod accesses reflectively.
 -keepclassmembers class com.example.chestdropper.Features {
     *** running;
     *** movementMode;
