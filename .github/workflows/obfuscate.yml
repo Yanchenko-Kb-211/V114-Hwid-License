@@ -27,15 +27,28 @@ jobs:
           curl -L --fail --silent --show-error             -o proguard.zip             https://github.com/Guardsquare/proguard/releases/download/v7.10.0/proguard-7.10.0.zip
           unzip -q proguard.zip -d tools
 
-      - name: Prepare clean input JAR
+      - name: Prepare Java bytecode patcher
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error             -o asm.jar             https://repo1.maven.org/maven2/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar
+          javac -cp asm.jar tools/TransitionResetPatch.java
+
+      - name: Patch restart transition state
         shell: bash
         run: |
           set -euo pipefail
           rm -rf build
           mkdir -p build/input
 
-          cp Homka-Avto-Farm_Hwid.jar build/input/source.jar
+          java -cp "tools:asm.jar" TransitionResetPatch             Homka-Avto-Farm_Hwid.jar             build/input/patched.jar
+
+      - name: Prepare clean input JAR
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p build/input/unpacked
+
+          cp build/input/patched.jar build/input/source.jar
           unzip -q build/input/source.jar -d build/input/unpacked
 
           # Normalize archive permissions. GitHub's checkout preserves the
@@ -46,8 +59,7 @@ jobs:
           find build/input/unpacked -type f -name '*.javap' -delete
 
           # Remove Java signature metadata before reprocessing.
-          find build/input/unpacked/META-INF -maxdepth 1 -type f \
-            \( -name '*.SF' -o -name '*.RSA' -o -name '*.DSA' \) -delete
+          find build/input/unpacked/META-INF -maxdepth 1 -type f             ( -name '*.SF' -o -name '*.RSA' -o -name '*.DSA' ) -delete
 
           (
             cd build/input/unpacked
