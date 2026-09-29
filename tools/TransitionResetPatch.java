@@ -270,29 +270,25 @@ public final class TransitionResetPatch {
 
                     @Override
                     public void visitFieldInsn(int opcode, String owner, String field, String desc) {
-                        super.visitFieldInsn(opcode, owner, field, desc);
-
-                        // The only PUTSTATIC Features.running in tick() is the
-                        // actual F11 toggle. After the assignment, inspect the new
-                        // value. We reset ONLY when it became false (F11 OFF).
-                        // This preserves the original F11 ON path completely.
+                        // Reset the previous automation session BEFORE the original
+                        // F11 toggle changes Features.running. This makes every F11
+                        // edge a clean session while leaving the original toggle
+                        // instruction and ON path untouched.
                         if (!injected &&
-                                opcode == Opcodes.PUTSTATIC &&
+                                opcode == Opcodes.GETSTATIC &&
                                 owner.equals(FEATURES) &&
                                 field.equals("running") &&
                                 desc.equals("Z")) {
+                            // The first GETSTATIC running in this tick() is the
+                            // condition used immediately before the running toggle.
                             injected = true;
-
-                            Label notOff = new Label();
-                            visitFieldInsn(Opcodes.GETSTATIC, FEATURES, "running", "Z");
-                            visitJumpInsn(Opcodes.IFNE, notOff);
 
                             visitVarInsn(Opcodes.ALOAD, 0);
                             visitMethodInsn(Opcodes.INVOKESTATIC, FEATURES,
                                     "resetAutomationSession", "(Ljava/lang/Object;)V", false);
-
-                            visitLabel(notOff);
                         }
+
+                        super.visitFieldInsn(opcode, owner, field, desc);
                     }
                 };
             }
