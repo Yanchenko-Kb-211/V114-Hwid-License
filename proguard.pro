@@ -49,3 +49,4 @@
 
 # Fabric entrypoints and reflective class names are adapted in fabric.mod.json
 # and in Class.forName string constants, so their class names can be obfuscated.
+# Build pipeline: obfuscation only; optimization/shrinking are intentionally disabled for compatibility.
