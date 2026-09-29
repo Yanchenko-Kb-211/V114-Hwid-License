@@ -51,15 +51,14 @@ jobs:
           cp build/input/patched.jar build/input/source.jar
           unzip -q build/input/source.jar -d build/input/unpacked
 
-          # Normalize archive permissions. GitHub's checkout preserves the
-          # Unix permission bits stored in the original JAR entries.
+          # Normalize archive permissions.
           chmod -R u+rwX build/input/unpacked
 
-          # These files are build/debug dumps and are not needed by Fabric.
+          # Remove build/debug dumps. They are not needed by Fabric.
           find build/input/unpacked -type f -name '*.javap' -delete
 
-          # Remove Java signature metadata before reprocessing.
-          find build/input/unpacked/META-INF -maxdepth 1 -type f             ( -name '*.SF' -o -name '*.RSA' -o -name '*.DSA' ) -delete
+          # Remove old Java signature metadata when present.
+          rm -f build/input/unpacked/META-INF/*.SF                 build/input/unpacked/META-INF/*.RSA                 build/input/unpacked/META-INF/*.DSA || true
 
           (
             cd build/input/unpacked
