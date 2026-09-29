@@ -36,10 +36,10 @@ public final class TransitionResetPatch {
                 }
 
                 switch (e.getName()) {
-                    case AUTO + ".class" -> data = patchAutoMove(data);
-                    case SNAKE + ".class" -> data = patchSnakeTransition(data);
-                    case CHEST + ".class" -> data = patchChestDropper(data);
-                    case FEATURES + ".class" -> data = patchFeatures(data);
+                    case AUTO + ".class" -> data = addAutoReset(data);
+                    case SNAKE + ".class" -> data = addSnakeReset(data);
+                    case CHEST + ".class" -> data = addChestReset(data);
+                    case FEATURES + ".class" -> data = patchF11Off(data);
                     default -> {}
                 }
 
@@ -51,10 +51,10 @@ public final class TransitionResetPatch {
             }
         }
 
-        System.out.println("Patched: full F11 session reset");
+        System.out.println("Patched: complete state reset on F11 OFF");
     }
 
-    private static byte[] patchAutoMove(byte[] original) {
+    private static byte[] addAutoReset(byte[] original) {
         ClassReader cr = new ClassReader(original);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
 
@@ -68,18 +68,24 @@ public final class TransitionResetPatch {
                         null,
                         null
                 );
-
                 mv.visitCode();
 
-                // Release D before clearing the state that tracks whether D is held.
+                // Release a physically held D, but never let a release failure
+                // prevent the F11 toggle from completing.
+                Label relStart = new Label();
+                Label relEnd = new Label();
+                Label relHandler = new Label();
+                Label afterRelease = new Label();
+                mv.visitTryCatchBlock(relStart, relEnd, relHandler, "java/lang/Throwable");
+                mv.visitLabel(relStart);
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "releaseD",
-                        "(Ljava/lang/Object;)V",
-                        false
-                );
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, AUTO, "releaseD",
+                        "(Ljava/lang/Object;)V", false);
+                mv.visitLabel(relEnd);
+                mv.visitJumpInsn(Opcodes.GOTO, afterRelease);
+                mv.visitLabel(relHandler);
+                mv.visitInsn(Opcodes.POP);
+                mv.visitLabel(afterRelease);
 
                 putStaticBoolean(mv, AUTO, "active", false);
                 putStaticBoolean(mv, AUTO, "wasBusy", false);
@@ -94,13 +100,8 @@ public final class TransitionResetPatch {
                 putStaticBoolean(mv, AUTO, "haveTravelYaw", false);
 
                 mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "processed", "Ljava/util/Set;");
-                mv.visitMethodInsn(
-                        Opcodes.INVOKEINTERFACE,
-                        "java/util/Set",
-                        "clear",
-                        "()V",
-                        true
-                );
+                mv.visitMethodInsn(Opcodes.INVOKEINTERFACE, "java/util/Set", "clear",
+                        "()V", true);
 
                 putStaticLong(mv, AUTO, "logicalTick", 0L);
                 putStaticBoolean(mv, AUTO, "timingActive", false);
@@ -110,7 +111,6 @@ public final class TransitionResetPatch {
                 mv.visitInsn(Opcodes.RETURN);
                 mv.visitMaxs(0, 0);
                 mv.visitEnd();
-
                 super.visitEnd();
             }
         };
@@ -119,43 +119,11 @@ public final class TransitionResetPatch {
         return cw.toByteArray();
     }
 
-    private static byte[] patchSnakeTransition(byte[] original) {
+    private static byte[] addSnakeReset(byte[] original) {
         ClassReader cr = new ClassReader(original);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
 
         ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
-            @Override
-            public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                             String signature, String[] exceptions) {
-                MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
-
-                if (!name.equals("tick") || !descriptor.equals("(Ljava/lang/Object;)V")) {
-                    return mv;
-                }
-
-                return new MethodVisitor(Opcodes.ASM9, mv) {
-                    @Override
-                    public void visitCode() {
-                        super.visitCode();
-
-                        Label skip = new Label();
-
-                        // Extra safety: the transition timing pattern can only be
-                        // inherited while the mod is stopped, never across F11 runs.
-                        visitFieldInsn(Opcodes.GETSTATIC, SNAKE, "phase", "I");
-                        visitJumpInsn(Opcodes.IFNE, skip);
-
-                        visitFieldInsn(Opcodes.GETSTATIC, SNAKE, "wasRunning", "Z");
-                        visitJumpInsn(Opcodes.IFNE, skip);
-
-                        visitInsn(Opcodes.ICONST_0);
-                        visitFieldInsn(Opcodes.PUTSTATIC, SNAKE, "transitionCountPattern", "I");
-
-                        visitLabel(skip);
-                    }
-                };
-            }
-
             @Override
             public void visitEnd() {
                 MethodVisitor mv = super.visitMethod(
@@ -165,17 +133,22 @@ public final class TransitionResetPatch {
                         null,
                         null
                 );
-
                 mv.visitCode();
 
+                Label relStart = new Label();
+                Label relEnd = new Label();
+                Label relHandler = new Label();
+                Label afterRelease = new Label();
+                mv.visitTryCatchBlock(relStart, relEnd, relHandler, "java/lang/Throwable");
+                mv.visitLabel(relStart);
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        SNAKE,
-                        "safeReleaseHorizontal",
-                        "(Ljava/lang/Object;)V",
-                        false
-                );
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, SNAKE, "safeReleaseHorizontal",
+                        "(Ljava/lang/Object;)V", false);
+                mv.visitLabel(relEnd);
+                mv.visitJumpInsn(Opcodes.GOTO, afterRelease);
+                mv.visitLabel(relHandler);
+                mv.visitInsn(Opcodes.POP);
+                mv.visitLabel(afterRelease);
 
                 putStaticInt(mv, SNAKE, "phase", 0);
                 putStaticInt(mv, SNAKE, "phaseTicks", 0);
@@ -188,7 +161,6 @@ public final class TransitionResetPatch {
                 mv.visitInsn(Opcodes.RETURN);
                 mv.visitMaxs(0, 0);
                 mv.visitEnd();
-
                 super.visitEnd();
             }
         };
@@ -197,7 +169,7 @@ public final class TransitionResetPatch {
         return cw.toByteArray();
     }
 
-    private static byte[] patchChestDropper(byte[] original) {
+    private static byte[] addChestReset(byte[] original) {
         ClassReader cr = new ClassReader(original);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
 
@@ -211,19 +183,11 @@ public final class TransitionResetPatch {
                         null,
                         null
                 );
-
                 mv.visitCode();
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        CHEST,
-                        "reset",
-                        "()V",
-                        false
-                );
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, CHEST, "reset", "()V", false);
                 mv.visitInsn(Opcodes.RETURN);
                 mv.visitMaxs(0, 0);
                 mv.visitEnd();
-
                 super.visitEnd();
             }
         };
@@ -232,50 +196,50 @@ public final class TransitionResetPatch {
         return cw.toByteArray();
     }
 
-    private static byte[] patchFeatures(byte[] original) {
+    private static byte[] patchF11Off(byte[] original) {
         ClassReader cr = new ClassReader(original);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
 
         ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                             String signature, String[] exceptions) {
+                                              String signature, String[] exceptions) {
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
 
-                if (name.equals("tick") && descriptor.equals("(Ljava/lang/Object;)V")) {
-                    return new MethodVisitor(Opcodes.ASM9, mv) {
-                        private boolean injected;
-
-                        @Override
-                        public void visitVarInsn(int opcode, int var) {
-                            super.visitVarInsn(opcode, var);
-
-                            // In the existing bytecode local 4 is the F11 edge flag:
-                            // f11() && !wasF11. Reset the complete automation state
-                            // on every F11 press before the original toggle logic.
-                            if (!injected && opcode == Opcodes.ISTORE && var == 4) {
-                                injected = true;
-
-                                Label noEdge = new Label();
-                                visitVarInsn(Opcodes.ILOAD, 4);
-                                visitJumpInsn(Opcodes.IFEQ, noEdge);
-
-                                visitVarInsn(Opcodes.ALOAD, 0);
-                                visitMethodInsn(
-                                        Opcodes.INVOKESTATIC,
-                                        FEATURES,
-                                        "resetAutomationSession",
-                                        "(Ljava/lang/Object;)V",
-                                        false
-                                );
-
-                                visitLabel(noEdge);
-                            }
-                        }
-                    };
+                if (!name.equals("tick") || !descriptor.equals("(Ljava/lang/Object;)V")) {
+                    return mv;
                 }
 
-                return mv;
+                return new MethodVisitor(Opcodes.ASM9, mv) {
+                    private boolean injected;
+
+                    @Override
+                    public void visitFieldInsn(int opcode, String owner, String field, String desc) {
+                        super.visitFieldInsn(opcode, owner, field, desc);
+
+                        // The only PUTSTATIC Features.running in tick() is the
+                        // actual F11 toggle. After the assignment, inspect the new
+                        // value. We reset ONLY when it became false (F11 OFF).
+                        // This preserves the original F11 ON path completely.
+                        if (!injected &&
+                                opcode == Opcodes.PUTSTATIC &&
+                                owner.equals(FEATURES) &&
+                                field.equals("running") &&
+                                desc.equals("Z")) {
+                            injected = true;
+
+                            Label notOff = new Label();
+                            visitFieldInsn(Opcodes.GETSTATIC, FEATURES, "running", "Z");
+                            visitJumpInsn(Opcodes.IFNE, notOff);
+
+                            visitVarInsn(Opcodes.ALOAD, 0);
+                            visitMethodInsn(Opcodes.INVOKESTATIC, FEATURES,
+                                    "resetAutomationSession", "(Ljava/lang/Object;)V", false);
+
+                            visitLabel(notOff);
+                        }
+                    }
+                };
             }
 
             @Override
@@ -287,48 +251,30 @@ public final class TransitionResetPatch {
                         null,
                         null
                 );
-
                 mv.visitCode();
 
-                // Reset all Features-owned session state except running/wasF11,
-                // because the original F11 toggle still needs to change running.
+                // Reset only session-owned state. Do NOT touch running or wasF11;
+                // the original F11 edge detector must remain intact.
                 putStaticBoolean(mv, FEATURES, "offShown", false);
                 putStaticLong(mv, FEATURES, "lastStatus", 0L);
                 putStaticBoolean(mv, FEATURES, "batchStarted", false);
                 putStaticObjectNull(mv, FEATURES, "target");
                 putStaticBoolean(mv, FEATURES, "movementMode", false);
 
-                // Reset every stateful subsystem and release all movement keys.
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "resetSession",
-                        "(Ljava/lang/Object;)V",
-                        false
-                );
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, AUTO,
+                        "resetSession", "(Ljava/lang/Object;)V", false);
 
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        SNAKE,
-                        "resetSession",
-                        "(Ljava/lang/Object;)V",
-                        false
-                );
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, SNAKE,
+                        "resetSession", "(Ljava/lang/Object;)V", false);
 
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        CHEST,
-                        "resetSession",
-                        "()V",
-                        false
-                );
+                mv.visitMethodInsn(Opcodes.INVOKESTATIC, CHEST,
+                        "resetSession", "()V", false);
 
                 mv.visitInsn(Opcodes.RETURN);
                 mv.visitMaxs(0, 0);
                 mv.visitEnd();
-
                 super.visitEnd();
             }
         };
