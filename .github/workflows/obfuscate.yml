@@ -17,16 +17,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Download ProGuard 7.10.0
         run: |
-          curl -L --fail --silent --show-error \
-            -o proguard.zip \
-            https://github.com/Guardsquare/proguard/releases/download/v7.10.0/proguard-7.10.0.zip
+          curl -L --fail --silent --show-error             -o proguard.zip             https://github.com/Guardsquare/proguard/releases/download/v7.10.0/proguard-7.10.0.zip
           unzip -q proguard.zip -d tools
 
       - name: Prepare clean input JAR
@@ -34,19 +32,22 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf build
-          mkdir -p build/input build/output
+          mkdir -p build/input
 
           cp Homka-Avto-Farm_Hwid.jar build/input/source.jar
           mkdir -p build/input/unpacked
           unzip -q build/input/source.jar -d build/input/unpacked
 
-          # These files are build-time/debug dumps and are not needed by Fabric.
+          # Normalize archive permissions. GitHub's checkout preserves the
+          # Unix permission bits stored in the original JAR entries.
+          chmod -R u+rwX build/input/unpacked
+
+          # These files are build/debug dumps and are not needed by Fabric.
           find build/input/unpacked -type f -name '*.javap' -delete
 
-          # Remove possible old Java signature metadata before reprocessing.
-          rm -f build/input/unpacked/META-INF/*.SF \
-                build/input/unpacked/META-INF/*.RSA \
-                build/input/unpacked/META-INF/*.DSA
+          # Remove Java signature metadata before reprocessing.
+          find build/input/unpacked/META-INF -maxdepth 1 -type f \
+            \( -name '*.SF' -o -name '*.RSA' -o -name '*.DSA' \) -delete
 
           (
             cd build/input/unpacked
@@ -89,7 +90,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Homka-Avto-Farm_Hwid_OBF
-          path: |
-            build/Homka-Avto-Farm_Hwid_OBF.jar
+          path: build/Homka-Avto-Farm_Hwid_OBF.jar
           if-no-files-found: error
           retention-days: 30
