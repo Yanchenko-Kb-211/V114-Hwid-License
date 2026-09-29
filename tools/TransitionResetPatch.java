@@ -300,6 +300,8 @@ public final class TransitionResetPatch {
                 // x = num(call(player, "method_23317"))
                 mv.visitVarInsn(Opcodes.ALOAD, 3);
                 mv.visitLdcInsn("method_23317");
+                mv.visitInsn(Opcodes.ICONST_0);
+                mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
                 mv.visitMethodInsn(
                         Opcodes.INVOKESTATIC,
                         AUTO,
@@ -319,6 +321,8 @@ public final class TransitionResetPatch {
                 // z = num(call(player, "method_23321"))
                 mv.visitVarInsn(Opcodes.ALOAD, 3);
                 mv.visitLdcInsn("method_23321");
+                mv.visitInsn(Opcodes.ICONST_0);
+                mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
                 mv.visitMethodInsn(
                         Opcodes.INVOKESTATIC,
                         AUTO,
