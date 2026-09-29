@@ -1,4 +1,4 @@
--injars Homka-Avto-Farm_Hwid.jar
+-injars build/input/clean.jar
 -outjars build/Homka-Avto-Farm_Hwid_OBF.jar
 
 -libraryjars <java.home>/jmods/java.base.jmod
@@ -48,5 +48,4 @@
 }
 
 # Fabric entrypoints and reflective class names are adapted in fabric.mod.json
-# and in Class.forName string constants, so their class names can be obfuscated.
-# Build pipeline: obfuscation only; optimization/shrinking are intentionally disabled for compatibility.
+# and in Class.forName string constants.
