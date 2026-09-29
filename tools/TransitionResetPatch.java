@@ -9,8 +9,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 public final class TransitionResetPatch {
-    private static final String SNAKE = "com/example/chestdropper/SnakeTransition";
-    private static final String AUTO = "com/example/chestdropper/AutoMove";
+    private static final String PKG = "com/example/chestdropper/";
+    private static final String FEATURES = PKG + "Features";
+    private static final String AUTO = PKG + "AutoMove";
+    private static final String SNAKE = PKG + "SnakeTransition";
+    private static final String CHEST = PKG + "ChestDropperMod";
 
     public static void main(String[] args) throws Exception {
         if (args.length != 2) {
@@ -32,10 +35,12 @@ public final class TransitionResetPatch {
                     data = in.readAllBytes();
                 }
 
-                if (e.getName().equals(SNAKE + ".class")) {
-                    data = patchSnakeTransition(data);
-                } else if (e.getName().equals(AUTO + ".class")) {
-                    data = patchAutoMove(data);
+                switch (e.getName()) {
+                    case AUTO + ".class" -> data = patchAutoMove(data);
+                    case SNAKE + ".class" -> data = patchSnakeTransition(data);
+                    case CHEST + ".class" -> data = patchChestDropper(data);
+                    case FEATURES + ".class" -> data = patchFeatures(data);
+                    default -> {}
                 }
 
                 var outEntry = new java.util.zip.ZipEntry(e.getName());
@@ -46,7 +51,72 @@ public final class TransitionResetPatch {
             }
         }
 
-        System.out.println("Patched restart state and wall-transition guard: " + output);
+        System.out.println("Patched: full F11 session reset");
+    }
+
+    private static byte[] patchAutoMove(byte[] original) {
+        ClassReader cr = new ClassReader(original);
+        ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
+
+        ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public void visitEnd() {
+                MethodVisitor mv = super.visitMethod(
+                        Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                        "resetSession",
+                        "(Ljava/lang/Object;)V",
+                        null,
+                        null
+                );
+
+                mv.visitCode();
+
+                // Release D before clearing the state that tracks whether D is held.
+                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                mv.visitMethodInsn(
+                        Opcodes.INVOKESTATIC,
+                        AUTO,
+                        "releaseD",
+                        "(Ljava/lang/Object;)V",
+                        false
+                );
+
+                putStaticBoolean(mv, AUTO, "active", false);
+                putStaticBoolean(mv, AUTO, "wasBusy", false);
+                putStaticBoolean(mv, AUTO, "moving", false);
+                putStaticBoolean(mv, AUTO, "syntheticDPressed", false);
+                putStaticInt(mv, AUTO, "moveTick", 0);
+                putStaticInt(mv, AUTO, "scanTick", 0);
+                putStaticObjectNull(mv, AUTO, "currentPos");
+                putStaticObjectNull(mv, AUTO, "rightKey");
+                putStaticObjectNull(mv, AUTO, "setPressed");
+                putStaticDouble(mv, AUTO, "travelYaw", 0.0D);
+                putStaticBoolean(mv, AUTO, "haveTravelYaw", false);
+
+                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "processed", "Ljava/util/Set;");
+                mv.visitMethodInsn(
+                        Opcodes.INVOKEINTERFACE,
+                        "java/util/Set",
+                        "clear",
+                        "()V",
+                        true
+                );
+
+                putStaticLong(mv, AUTO, "logicalTick", 0L);
+                putStaticBoolean(mv, AUTO, "timingActive", false);
+                putStaticInt(mv, AUTO, "timingPhase", -1);
+                putStaticLong(mv, AUTO, "nextActionTick", -1L);
+
+                mv.visitInsn(Opcodes.RETURN);
+                mv.visitMaxs(0, 0);
+                mv.visitEnd();
+
+                super.visitEnd();
+            }
+        };
+
+        cr.accept(cv, 0);
+        return cw.toByteArray();
     }
 
     private static byte[] patchSnakeTransition(byte[] original) {
@@ -54,42 +124,6 @@ public final class TransitionResetPatch {
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
 
         ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
-            @Override
-            public void visitEnd() {
-                // Hard guard used by AutoMove when it detects that the player is
-                // actually blocked by the wall. The existing startTransition()
-                // contains the complete transition sequence.
-                MethodVisitor mv = super.visitMethod(
-                        Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
-                        "forceTransition",
-                        "(Ljava/lang/Object;)V",
-                        null,
-                        new String[] {"java/lang/Exception"}
-                );
-
-                mv.visitCode();
-                Label done = new Label();
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, SNAKE, "phase", "I");
-                mv.visitJumpInsn(Opcodes.IFNE, done);
-
-                mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        SNAKE,
-                        "startTransition",
-                        "(Ljava/lang/Object;)V",
-                        false
-                );
-
-                mv.visitLabel(done);
-                mv.visitInsn(Opcodes.RETURN);
-                mv.visitMaxs(0, 0);
-                mv.visitEnd();
-
-                super.visitEnd();
-            }
-
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                                              String signature, String[] exceptions) {
@@ -106,9 +140,8 @@ public final class TransitionResetPatch {
 
                         Label skip = new Label();
 
-                        // Reset the transition timing pattern at the start of a
-                        // fresh F11 session. This prevents timing state from
-                        // leaking from a previous run.
+                        // Extra safety: the transition timing pattern can only be
+                        // inherited while the mod is stopped, never across F11 runs.
                         visitFieldInsn(Opcodes.GETSTATIC, SNAKE, "phase", "I");
                         visitJumpInsn(Opcodes.IFNE, skip);
 
@@ -122,13 +155,84 @@ public final class TransitionResetPatch {
                     }
                 };
             }
+
+            @Override
+            public void visitEnd() {
+                MethodVisitor mv = super.visitMethod(
+                        Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                        "resetSession",
+                        "(Ljava/lang/Object;)V",
+                        null,
+                        null
+                );
+
+                mv.visitCode();
+
+                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                mv.visitMethodInsn(
+                        Opcodes.INVOKESTATIC,
+                        SNAKE,
+                        "safeReleaseHorizontal",
+                        "(Ljava/lang/Object;)V",
+                        false
+                );
+
+                putStaticInt(mv, SNAKE, "phase", 0);
+                putStaticInt(mv, SNAKE, "phaseTicks", 0);
+                putStaticBoolean(mv, SNAKE, "movingLeft", false);
+                putStaticBoolean(mv, SNAKE, "wasRunning", false);
+                putStaticBoolean(mv, SNAKE, "dropStarted", false);
+                putStaticLong(mv, SNAKE, "lastErrorLog", 0L);
+                putStaticInt(mv, SNAKE, "transitionCountPattern", 0);
+
+                mv.visitInsn(Opcodes.RETURN);
+                mv.visitMaxs(0, 0);
+                mv.visitEnd();
+
+                super.visitEnd();
+            }
         };
 
         cr.accept(cv, 0);
         return cw.toByteArray();
     }
 
-    private static byte[] patchAutoMove(byte[] original) {
+    private static byte[] patchChestDropper(byte[] original) {
+        ClassReader cr = new ClassReader(original);
+        ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
+
+        ClassVisitor cv = new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public void visitEnd() {
+                MethodVisitor mv = super.visitMethod(
+                        Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                        "resetSession",
+                        "()V",
+                        null,
+                        null
+                );
+
+                mv.visitCode();
+                mv.visitMethodInsn(
+                        Opcodes.INVOKESTATIC,
+                        CHEST,
+                        "reset",
+                        "()V",
+                        false
+                );
+                mv.visitInsn(Opcodes.RETURN);
+                mv.visitMaxs(0, 0);
+                mv.visitEnd();
+
+                super.visitEnd();
+            }
+        };
+
+        cr.accept(cv, 0);
+        return cw.toByteArray();
+    }
+
+    private static byte[] patchFeatures(byte[] original) {
         ClassReader cr = new ClassReader(original);
         ClassWriter cw = new ClassWriter(cr, ClassWriter.COMPUTE_FRAMES);
 
@@ -146,51 +250,27 @@ public final class TransitionResetPatch {
                         public void visitVarInsn(int opcode, int var) {
                             super.visitVarInsn(opcode, var);
 
-                            // In the current AutoMove bytecode:
-                            //   local 4 = isDropping
-                            //   local 5 = target
-                            // The target is stored exactly once near the start
-                            // of tick(). Put the physical wall detector right
-                            // after that state is available.
-                            if (!injected && opcode == Opcodes.ASTORE && var == 5) {
+                            // In the existing bytecode local 4 is the F11 edge flag:
+                            // f11() && !wasF11. Reset the complete automation state
+                            // on every F11 press before the original toggle logic.
+                            if (!injected && opcode == Opcodes.ISTORE && var == 4) {
                                 injected = true;
 
-                                Label continueLabel = new Label();
+                                Label noEdge = new Label();
+                                visitVarInsn(Opcodes.ILOAD, 4);
+                                visitJumpInsn(Opcodes.IFEQ, noEdge);
 
                                 visitVarInsn(Opcodes.ALOAD, 0);
-                                visitVarInsn(Opcodes.ILOAD, 4);
-                                visitVarInsn(Opcodes.ALOAD, 5);
                                 visitMethodInsn(
                                         Opcodes.INVOKESTATIC,
-                                        AUTO,
-                                        "checkAndForceWallTransition",
-                                        "(Ljava/lang/Object;ZLjava/lang/Object;)Z",
+                                        FEATURES,
+                                        "resetAutomationSession",
+                                        "(Ljava/lang/Object;)V",
                                         false
                                 );
-                                visitJumpInsn(Opcodes.IFEQ, continueLabel);
-                                visitInsn(Opcodes.RETURN);
-                                visitLabel(continueLabel);
+
+                                visitLabel(noEdge);
                             }
-                        }
-                    };
-                }
-
-                if (name.equals("resetRunState") && descriptor.equals("()V")) {
-                    return new MethodVisitor(Opcodes.ASM9, mv) {
-                        @Override
-                        public void visitCode() {
-                            super.visitCode();
-                        }
-
-                        @Override
-                        public void visitEnd() {
-                            visitInsn(Opcodes.ICONST_0);
-                            visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallSampleValid", "Z");
-
-                            visitInsn(Opcodes.ICONST_0);
-                            visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallBlockedTicks", "I");
-
-                            super.visitEnd();
                         }
                     };
                 }
@@ -200,218 +280,30 @@ public final class TransitionResetPatch {
 
             @Override
             public void visitEnd() {
-                // State used to detect a real wall block from consecutive D-held
-                // ticks. It is deliberately independent from moveTick, because
-                // moveTick also drives the normal D pulse pattern.
-                super.visitField(
-                        Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
-                        "wallSampleX",
-                        "D",
-                        null,
-                        null
-                ).visitEnd();
-
-                super.visitField(
-                        Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
-                        "wallSampleZ",
-                        "D",
-                        null,
-                        null
-                ).visitEnd();
-
-                super.visitField(
-                        Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
-                        "wallSampleValid",
-                        "Z",
-                        null,
-                        null
-                ).visitEnd();
-
-                super.visitField(
-                        Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
-                        "wallBlockedTicks",
-                        "I",
-                        null,
-                        null
-                ).visitEnd();
-
-                addWallDetectorMethod();
-
-                super.visitEnd();
-            }
-
-            private void addWallDetectorMethod() {
                 MethodVisitor mv = super.visitMethod(
-                        Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
-                        "checkAndForceWallTransition",
-                        "(Ljava/lang/Object;ZLjava/lang/Object;)Z",
+                        Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                        "resetAutomationSession",
+                        "(Ljava/lang/Object;)V",
                         null,
                         null
                 );
 
                 mv.visitCode();
 
-                Label resetReturn = new Label();
-                Label afterEligibility = new Label();
-                Label noBlock = new Label();
-                Label noTransition = new Label();
-                Label done = new Label();
+                // Reset all Features-owned session state except running/wasF11,
+                // because the original F11 toggle still needs to change running.
+                putStaticBoolean(mv, FEATURES, "offShown", false);
+                putStaticLong(mv, FEATURES, "lastStatus", 0L);
+                putStaticBoolean(mv, FEATURES, "batchStarted", false);
+                putStaticObjectNull(mv, FEATURES, "target");
+                putStaticBoolean(mv, FEATURES, "movementMode", false);
 
-                // Ignore the detector while dropping, while a chest target exists,
-                // while movement is not active, during the first few movement ticks,
-                // or while a row transition is already running.
-                mv.visitVarInsn(Opcodes.ILOAD, 1);
-                mv.visitJumpInsn(Opcodes.IFNE, resetReturn);
-
-                mv.visitVarInsn(Opcodes.ALOAD, 2);
-                mv.visitJumpInsn(Opcodes.IFNONNULL, resetReturn);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "moving", "Z");
-                mv.visitJumpInsn(Opcodes.IFEQ, resetReturn);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "moveTick", "I");
-                mv.visitIntInsn(Opcodes.BIPUSH, 4);
-                mv.visitJumpInsn(Opcodes.IF_ICMPLT, resetReturn);
-
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        SNAKE,
-                        "isTransitionActive",
-                        "()Z",
-                        false
-                );
-                mv.visitJumpInsn(Opcodes.IFNE, resetReturn);
-
-                // player = field(client, "field_1724")
-                mv.visitVarInsn(Opcodes.ALOAD, 0);
-                mv.visitLdcInsn("field_1724");
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "field",
-                        "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;",
-                        false
-                );
-                mv.visitVarInsn(Opcodes.ASTORE, 3);
-
-                mv.visitVarInsn(Opcodes.ALOAD, 3);
-                mv.visitJumpInsn(Opcodes.IFNULL, resetReturn);
-
-                // x = num(call(player, "method_23317"))
-                mv.visitVarInsn(Opcodes.ALOAD, 3);
-                mv.visitLdcInsn("method_23317");
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "call",
-                        "(Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;",
-                        false
-                );
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "num",
-                        "(Ljava/lang/Object;)D",
-                        false
-                );
-                mv.visitVarInsn(Opcodes.DSTORE, 4);
-
-                // z = num(call(player, "method_23321"))
-                mv.visitVarInsn(Opcodes.ALOAD, 3);
-                mv.visitLdcInsn("method_23321");
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitTypeInsn(Opcodes.ANEWARRAY, "java/lang/Object");
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "call",
-                        "(Ljava/lang/Object;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;",
-                        false
-                );
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "num",
-                        "(Ljava/lang/Object;)D",
-                        false
-                );
-                mv.visitVarInsn(Opcodes.DSTORE, 6);
-
-                // Only a held synthetic D key can confirm that the player is
-                // blocked. This avoids interpreting the intentional 5-tick D
-                // release window as a wall.
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "syntheticDPressed", "Z");
-                mv.visitJumpInsn(Opcodes.IFEQ, noBlock);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "wallSampleValid", "Z");
-                mv.visitJumpInsn(Opcodes.IFEQ, afterEligibility);
-
-                mv.visitVarInsn(Opcodes.DLOAD, 4);
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "wallSampleX", "D");
-                mv.visitInsn(Opcodes.DSUB);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        "java/lang/Math",
-                        "abs",
-                        "(D)D",
-                        false
-                );
-                mv.visitLdcInsn(0.001D);
-                mv.visitInsn(Opcodes.DCMPL);
-                mv.visitJumpInsn(Opcodes.IFGE, noBlock);
-
-                mv.visitVarInsn(Opcodes.DLOAD, 6);
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "wallSampleZ", "D");
-                mv.visitInsn(Opcodes.DSUB);
-                mv.visitMethodInsn(
-                        Opcodes.INVOKESTATIC,
-                        "java/lang/Math",
-                        "abs",
-                        "(D)D",
-                        false
-                );
-                mv.visitLdcInsn(0.001D);
-                mv.visitInsn(Opcodes.DCMPL);
-                mv.visitJumpInsn(Opcodes.IFGE, noBlock);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "wallBlockedTicks", "I");
-                mv.visitInsn(Opcodes.ICONST_1);
-                mv.visitInsn(Opcodes.IADD);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallBlockedTicks", "I");
-                mv.visitJumpInsn(Opcodes.GOTO, afterEligibility);
-
-                mv.visitLabel(noBlock);
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallBlockedTicks", "I");
-
-                mv.visitLabel(afterEligibility);
-
-                // Remember the latest horizontal position for the next held-D tick.
-                mv.visitVarInsn(Opcodes.DLOAD, 4);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallSampleX", "D");
-
-                mv.visitVarInsn(Opcodes.DLOAD, 6);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallSampleZ", "D");
-
-                mv.visitInsn(Opcodes.ICONST_1);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallSampleValid", "Z");
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "syntheticDPressed", "Z");
-                mv.visitJumpInsn(Opcodes.IFEQ, done);
-
-                mv.visitFieldInsn(Opcodes.GETSTATIC, AUTO, "wallBlockedTicks", "I");
-                mv.visitInsn(Opcodes.ICONST_1);
-                mv.visitJumpInsn(Opcodes.IF_ICMPLT, done);
-
-                // Start the full row-transition sequence immediately, before
-                // AutoMove can issue another D press on this tick.
+                // Reset every stateful subsystem and release all movement keys.
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
                 mv.visitMethodInsn(
                         Opcodes.INVOKESTATIC,
-                        SNAKE,
-                        "forceTransition",
+                        AUTO,
+                        "resetSession",
                         "(Ljava/lang/Object;)V",
                         false
                 );
@@ -419,48 +311,60 @@ public final class TransitionResetPatch {
                 mv.visitVarInsn(Opcodes.ALOAD, 0);
                 mv.visitMethodInsn(
                         Opcodes.INVOKESTATIC,
-                        AUTO,
-                        "releaseD",
+                        SNAKE,
+                        "resetSession",
                         "(Ljava/lang/Object;)V",
                         false
                 );
 
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "moving", "Z");
+                mv.visitMethodInsn(
+                        Opcodes.INVOKESTATIC,
+                        CHEST,
+                        "resetSession",
+                        "()V",
+                        false
+                );
 
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "moveTick", "I");
-
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "scanTick", "I");
-
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallBlockedTicks", "I");
-
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallSampleValid", "Z");
-
-                mv.visitInsn(Opcodes.ICONST_1);
-                mv.visitInsn(Opcodes.IRETURN);
-
-                mv.visitLabel(done);
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitInsn(Opcodes.IRETURN);
-
-                mv.visitLabel(resetReturn);
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallBlockedTicks", "I");
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitFieldInsn(Opcodes.PUTSTATIC, AUTO, "wallSampleValid", "Z");
-                mv.visitInsn(Opcodes.ICONST_0);
-                mv.visitInsn(Opcodes.IRETURN);
-
+                mv.visitInsn(Opcodes.RETURN);
                 mv.visitMaxs(0, 0);
                 mv.visitEnd();
+
+                super.visitEnd();
             }
         };
 
         cr.accept(cv, 0);
         return cw.toByteArray();
+    }
+
+    private static void putStaticBoolean(MethodVisitor mv, String owner, String field, boolean value) {
+        mv.visitInsn(value ? Opcodes.ICONST_1 : Opcodes.ICONST_0);
+        mv.visitFieldInsn(Opcodes.PUTSTATIC, owner, field, "Z");
+    }
+
+    private static void putStaticInt(MethodVisitor mv, String owner, String field, int value) {
+        if (value == -1) {
+            mv.visitInsn(Opcodes.ICONST_M1);
+        } else if (value >= 0 && value <= 5) {
+            mv.visitInsn(Opcodes.ICONST_0 + value);
+        } else {
+            mv.visitLdcInsn(value);
+        }
+        mv.visitFieldInsn(Opcodes.PUTSTATIC, owner, field, "I");
+    }
+
+    private static void putStaticObjectNull(MethodVisitor mv, String owner, String field) {
+        mv.visitInsn(Opcodes.ACONST_NULL);
+        mv.visitFieldInsn(Opcodes.PUTSTATIC, owner, field, "Ljava/lang/Object;");
+    }
+
+    private static void putStaticDouble(MethodVisitor mv, String owner, String field, double value) {
+        mv.visitLdcInsn(value);
+        mv.visitFieldInsn(Opcodes.PUTSTATIC, owner, field, "D");
+    }
+
+    private static void putStaticLong(MethodVisitor mv, String owner, String field, long value) {
+        mv.visitLdcInsn(value);
+        mv.visitFieldInsn(Opcodes.PUTSTATIC, owner, field, "J");
     }
 }
