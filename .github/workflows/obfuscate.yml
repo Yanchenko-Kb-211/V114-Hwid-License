@@ -48,10 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          java -cp "tools:asm.jar" LicenseSecurityPatch \\
-            build/input/patched.jar \\
-            build/input/secured.jar \\
-            build/classes/com/example/chestdropper/LicenseProofClient.class
+          java -cp "tools:asm.jar" LicenseSecurityPatch build/input/patched.jar build/input/secured.jar build/classes/com/example/chestdropper/LicenseProofClient.class
 
       - name: Prepare clean input JAR
         shell: bash
