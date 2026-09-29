@@ -31,8 +31,8 @@ jobs:
         run: |
           set -euo pipefail
           curl -L --fail --silent --show-error             -o asm.jar             https://repo1.maven.org/maven2/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar
-          mkdir -p build/classes
-          javac -d build/classes tools/LicenseProofClient.java
+          mkdir -p tools/classes
+          javac -d tools/classes tools/LicenseProofClient.java
           javac -cp asm.jar tools/TransitionResetPatch.java tools/LicenseSecurityPatch.java
 
       - name: Patch restart transition state
@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          java -cp "tools:asm.jar" LicenseSecurityPatch build/input/patched.jar build/input/secured.jar build/classes/com/example/chestdropper/LicenseProofClient.class
+          java -cp "tools:asm.jar" LicenseSecurityPatch build/input/patched.jar build/input/secured.jar tools/classes/com/example/chestdropper/LicenseProofClient.class
 
       - name: Prepare clean input JAR
         shell: bash
