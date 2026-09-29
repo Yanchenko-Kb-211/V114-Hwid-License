@@ -16,43 +16,34 @@
 
 -keepattributes InnerClasses,EnclosingMethod,*Annotation*,Signature,Exceptions
 
-# Preserve callback/entrypoint method names by method name, without relying on
-# resolving external Fabric API types during the ProGuard pass.
+# Preserve Fabric callback method names globally.
 -keepclassmembers class * {
     public void onInitializeClient(...);
     public void onInitialize(...);
     public void onEndTick(...);
 }
 
-# Keep names of members that the mod accesses reflectively.
--keepclassmembers class com.example.chestdropper.Features {
-    *** running;
-    *** movementMode;
-    *** batchStarted;
-    *** target;
-    *** resetOriginal(...);
-}
+# Preserve the three anonymous Fabric tick adapters as classes too.
+# This avoids loader/runtime dispatch differences after post-processing.
+-keep class com.example.chestdropper.AutoMove$1 { *; }
+-keep class com.example.chestdropper.Features$1 { *; }
+-keep class com.example.chestdropper.LicenseBootstrap$1 { *; }
 
--keepclassmembers class com.example.chestdropper.ChestDropperMod {
-    *** isDropping;
-    *** targetChestHit;
-    *** tickCounter;
-    *** dropPhase;
-    *** reset(...);
-    *** startQuickDrop(...);
-}
+# GUI classes rely on Minecraft Screen virtual-method overrides and
+# reflection from the F12 handler. Keep their classes and members intact.
+-keep class com.example.chestdropper.ConfigScreen { *; }
+-keep class com.example.chestdropper.LicenseScreen { *; }
+-keep class com.example.chestdropper.F12KeyHandler { *; }
 
--keepclassmembers class com.example.chestdropper.AutoMove {
-    *** moving;
-    *** moveTick;
-    *** scanTick;
-    *** travelYaw;
-    *** currentPos;
-    *** processed;
-    *** rightKey;
-    *** haveTravelYaw;
-    *** isProcessed(...);
-}
-
-# Fabric entrypoints and reflective class names are adapted in fabric.mod.json
-# and in Class.forName string constants.
+# The automation code intentionally uses reflection between its own classes.
+# Keep member names so reflective field/method lookup continues to work.
+-keepclassmembers class com.example.chestdropper.AutoMove { *; }
+-keepclassmembers class com.example.chestdropper.Features { *; }
+-keepclassmembers class com.example.chestdropper.ChestDropperMod { *; }
+-keepclassmembers class com.example.chestdropper.SnakeTransition { *; }
+-keepclassmembers class com.example.chestdropper.GuiBridge { *; }
+-keepclassmembers class com.example.chestdropper.LicenseManager { *; }
+-keepclassmembers class com.example.chestdropper.F10Poller { *; }
+-keepclassmembers class com.example.chestdropper.F12Bootstrap { *; }
+-keepclassmembers class com.example.chestdropper.LicenseBootstrap { *; }
+-keepclassmembers class com.example.chestdropper.SnakeTriggerFix { *; }
